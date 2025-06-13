@@ -7,17 +7,15 @@ a very simple rating system to decide if the weather
 and sea state are suitable for spearfishing around
 Kaikoura, New Zealand.
 
-It provides a Tkinter based GUI for manual
-inspection and can send a daily e-mail update using
-standard SMTP so no paid SMS service is required.
+It is designed to run without a graphical interface
+and can send regular e-mail updates using standard
+SMTP so no paid SMS service is required.
 """
 
 import os
 import threading
 import time
-import tkinter as tk
-from tkinter import ttk, messagebox
-from PIL import Image, ImageTk
+from PIL import Image
 import io
 import requests
 import schedule
@@ -166,7 +164,7 @@ def send_email(subject: str, message: str):
         print(f"Email sending failed: {exc}")
 
 
-def daily_task(gui=None):
+def daily_task():
     marine, weather = get_marine_conditions()
     open_rating, open_reasons = compute_openmeteo_rating(marine, weather)
     forecast = get_metservice_forecast()
@@ -186,12 +184,14 @@ def daily_task(gui=None):
         message_lines.append("\n".join(["Reasons:"] + reasons))
     message = "\n".join(message_lines)
     send_email("Spearfishing update", message)
-    if gui:
-        gui.update_conditions()
 
 
-def start_scheduler(gui=None):
-    schedule.every().day.at("07:00").do(daily_task, gui=gui)
+def start_scheduler():
+    frequency = os.getenv("EMAIL_FREQUENCY", "daily").lower()
+    if frequency == "weekly":
+        schedule.every().friday.at("07:00").do(daily_task)
+    else:
+        schedule.every().day.at("07:00").do(daily_task)
 
     def run():
         while True:
@@ -202,63 +202,13 @@ def start_scheduler(gui=None):
     t.start()
 
 
-class App(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Kaikoura Spearfishing Conditions")
-        self.geometry("800x600")
-
-        self.status_label = ttk.Label(self, text="Loading...")
-        self.status_label.pack(pady=5)
-
-        self.image_labels = {}
-        for name in ["CawthronEye", "KūtaiCam", "TASCAM"]:
-            frame = ttk.LabelFrame(self, text=name)
-            label = ttk.Label(frame)
-            label.pack()
-            frame.pack(side=tk.LEFT, expand=True, padx=5, pady=5)
-            self.image_labels[name] = label
-
-        refresh_btn = ttk.Button(self, text="Refresh", command=self.update_conditions)
-        refresh_btn.pack(pady=10)
-
-        self.update_conditions()
-
-    def update_conditions(self):
-        marine, weather = get_marine_conditions()
-        open_rating, open_reasons = compute_openmeteo_rating(marine, weather)
-        forecast = get_metservice_forecast()
-        met_rating, _ = compute_metservice_rating(forecast)
-        image_data = fetch_image(CAWTHRON_EYE_URL)
-        cam_rating = compute_image_rating(image_data)
-        all_ratings = [open_rating, met_rating, cam_rating]
-        avg_rating = sum(all_ratings) / len(all_ratings)
-        status_text = f"Overall rating: {int(avg_rating)}"
-        if open_reasons:
-            status_text += " - " + "; ".join(open_reasons)
-        self.status_label.config(text=status_text)
-        self.load_image("CawthronEye", CAWTHRON_EYE_URL)
-        self.load_image("KūtaiCam", KUTAI_CAM_URL)
-        self.load_image("TASCAM", TASCAM_URL)
-
-    def load_image(self, label_key, url):
-        data = fetch_image(url)
-        if not data:
-            return
-        try:
-            img = Image.open(io.BytesIO(data))
-            img.thumbnail((240, 200))
-            photo = ImageTk.PhotoImage(img)
-            self.image_labels[label_key].config(image=photo)
-            self.image_labels[label_key].image = photo
-        except Exception as exc:
-            print(f"Failed to load image from {url}: {exc}")
-
-
 def main():
-    app = App()
-    start_scheduler(gui=app)
-    app.mainloop()
+    start_scheduler()
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
